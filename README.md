@@ -113,5 +113,5 @@ set its influence). Within a category, tasks are weighted.
   core-dumps the whole GNOME session (2026-09-13). `server.py` signals every
   process in the server's session (ninja JIT jobs sit in their own process
   groups, so a group kill leaves compilers behind).
-- `serve-model.sh` caps `MAX_JOBS=3`: FlashInfer's FP4/MoE kernel JIT otherwise
-  runs 16 × ~5 GB compilers and triggers the kernel OOM killer.
+- `serve-model.sh` caps `MAX_JOBS=2`: FlashInfer's FP4/MoE kernel JIT otherwise
+  runs 16 compilers at up to ~8.6 GB each and triggers the kernel OOM killer.
