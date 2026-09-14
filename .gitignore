@@ -1,0 +1,13 @@
+# environments and caches
+.venv/
+__pycache__/
+*.pyc
+# benchmark outputs (large; live on disk, not in git)
+results/
+results_omp/
+report/_ffprofile/
+report/*.png
+report/_probe.html
+# binaries copied into the omp sandbox build context (~540 MB)
+omp-sandbox/omp
+omp-sandbox/natives/

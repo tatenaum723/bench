@@ -1,0 +1,30 @@
+--- sglang/srt/models/gemma4_unified.py.orig	2026-09-13 15:54:59.260253979 -0500
++++ sglang/srt/models/gemma4_unified.py	2026-09-13 16:04:39.502662196 -0500
+@@ -110,7 +110,13 @@
+ 
+     def __init__(self, multimodal_config, text_config):
+         super().__init__()
+-        self.multimodal_hidden_size = multimodal_config.output_proj_dims
++        # LOCAL PATCH (aipc, 2026-09-13): transformers' Gemma4UnifiedAudioConfig
++        # aliases output_proj_dims -> audio_embed_dim (640), but the config object
++        # SGLang builds here carries the Gemma4 audio default of 1536, so loading
++        # model.embed_audio.embedding_projection.weight [3840, 640] asserted.
++        self.multimodal_hidden_size = getattr(
++            multimodal_config, "audio_embed_dim", None
++        ) or multimodal_config.output_proj_dims
+         self.text_hidden_size = text_config.hidden_size
+         self.embedding_pre_projection_norm = Gemma4RMSNorm(
+             self.multimodal_hidden_size,
+@@ -190,7 +196,11 @@
+         )
+ 
+         text_tie = getattr(text_config, "tie_word_embeddings", True)
+-        if self.pp_group.world_size == 1 and text_tie:
++        # LOCAL PATCH (aipc, 2026-09-13): the inherited Gemma4ForConditionalGeneration
++        # forward/load_weights read self.lm_head_is_tied, but this __init__ skips the
++        # parent's and never set it -> AttributeError in decode CUDA graph capture.
++        self.lm_head_is_tied = self.pp_group.world_size == 1 and text_tie
++        if self.lm_head_is_tied:
+             self.lm_head = self.language_model.embed_tokens
+         elif self.pp_group.is_last_rank:
+             self.lm_head = ParallelLMHead(

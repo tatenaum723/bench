@@ -1,0 +1,157 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Keplerian Orbit</title>
+<style>
+  html,body{margin:0;height:100%;background:#0b0b10;color:#d8d8e0;
+            font:13px/1.5 system-ui,-apple-system,"Segoe UI",sans-serif}
+  #wrap{display:flex;height:100%;align-items:center;justify-content:center;gap:24px}
+  canvas{background:#08080d;border-radius:10px;box-shadow:0 0 0 1px #23232e}
+  #hud{min-width:220px}
+  h1{font-size:14px;margin:0 0 12px;letter-spacing:.04em;text-transform:uppercase;color:#8d8da0}
+  .row{display:flex;justify-content:space-between;padding:5px 0;border-bottom:1px solid #1c1c26}
+  .k{color:#8d8da0}.v{font-variant-numeric:tabular-nums;color:#eaeaf2}
+  .note{margin-top:14px;color:#6f6f82;font-size:11px}
+</style>
+</head>
+<body>
+<div id="wrap">
+  <canvas id="c" width="720" height="560"></canvas>
+  <div id="hud">
+    <h1>Orbital elements</h1>
+    <div class="row"><span class="k">eccentricity e</span><span class="v" id="ecc">0.600</span></div>
+    <div class="row"><span class="k">mean anomaly M</span><span class="v" id="M">0.0&deg;</span></div>
+    <div class="row"><span class="k">eccentric anom. E</span><span class="v" id="E">0.0&deg;</span></div>
+    <div class="row"><span class="k">true anomaly &nu;</span><span class="v" id="nu">0.0&deg;</span></div>
+    <div class="row"><span class="k">radius r</span><span class="v" id="r">0.00 AU</span></div>
+    <div class="row"><span class="k">speed v</span><span class="v" id="v">0.00 AU/yr</span></div>
+    <div class="row"><span class="k">Newton iters</span><span class="v" id="it">0</span></div>
+    <div class="note">Star sits at the focus (offset a&middot;e from the ellipse
+    centre). Equal-area wedges are shaded at equal time intervals &mdash; they
+    differ in shape but not in area, which is Kepler's second law.</div>
+  </div>
+</div>
+<script>
+(() => {
+  const cv = document.getElementById('c'), g = cv.getContext('2d');
+  const CX = cv.width * 0.58, CY = cv.height / 2;   // star drawn here
+
+  // --- orbital elements -------------------------------------------------
+  const a = 200;            // semi-major axis, px
+  const e = 0.6;            // eccentricity
+  const b = a * Math.sqrt(1 - e * e);
+  const c = a * e;          // centre-to-focus distance
+  const T = 8.0;            // period, seconds
+  const AU = 120;           // px per AU, for readouts
+  // Choose mu so the period really is T: T^2 = 4*pi^2*a^3/mu
+  const mu = 4 * Math.PI * Math.PI * a * a * a / (T * T);
+
+  // --- solve Kepler's equation M = E - e*sin(E) by Newton-Raphson -------
+  // No closed form exists. Start from E0 = M + e*sin(M), which converges in
+  // ~3 iterations even at e = 0.6.
+  let iters = 0;
+  function solveKepler(M) {
+    M = ((M % (2 * Math.PI)) + 2 * Math.PI) % (2 * Math.PI);
+    let E = M + e * Math.sin(M);
+    let n = 0;
+    for (; n < 30; n++) {
+      const f  = E - e * Math.sin(E) - M;     // residual
+      const fp = 1 - e * Math.cos(E);         // d/dE
+      const dE = f / fp;
+      E -= dE;
+      if (Math.abs(dE) < 1e-12) break;
+    }
+    iters = n + 1;
+    return E;
+  }
+
+  // Position relative to the FOCUS (the star), from eccentric anomaly.
+  function stateAt(E) {
+    const x = a * (Math.cos(E) - e);     // = r*cos(nu)
+    const y = b * Math.sin(E);           // = r*sin(nu)
+    const r = a * (1 - e * Math.cos(E));
+    const nu = Math.atan2(y, x);
+    const v = Math.sqrt(mu * (2 / r - 1 / a));   // vis-viva
+    return {x, y, r, nu, v};
+  }
+
+  // --- precompute equal-time wedges to make the 2nd law visible ---------
+  const WEDGES = 12, SUB = 24;
+  const wedges = [];
+  for (let k = 0; k < WEDGES; k++) {
+    const pts = [];
+    for (let s = 0; s <= SUB; s++) {
+      const M = 2 * Math.PI * (k + s / SUB) / WEDGES;
+      const st = stateAt(solveKepler(M));
+      pts.push([st.x, st.y]);
+    }
+    wedges.push(pts);
+  }
+
+  const trail = [];
+  const t0 = performance.now();
+
+  function frame(now) {
+    const t = (now - t0) / 1000;
+    const M = 2 * Math.PI * (t % T) / T;
+    const E = solveKepler(M);
+    const st = stateAt(E);
+
+    g.clearRect(0, 0, cv.width, cv.height);
+
+    // equal-area wedges: same area, visibly different angular extent
+    for (let k = 0; k < WEDGES; k++) {
+      g.beginPath();
+      g.moveTo(CX, CY);
+      for (const [x, y] of wedges[k]) g.lineTo(CX + x, CY - y);
+      g.closePath();
+      g.fillStyle = k % 2 ? 'rgba(90,130,220,0.10)' : 'rgba(90,130,220,0.05)';
+      g.fill();
+    }
+
+    // the ellipse itself -- centre is offset from the star by c = a*e
+    g.beginPath();
+    g.ellipse(CX - c, CY, a, b, 0, 0, 2 * Math.PI);
+    g.strokeStyle = '#2e2e42'; g.lineWidth = 1.5; g.stroke();
+
+    // both foci: the star occupies one of them
+    g.fillStyle = '#33334a';
+    g.beginPath(); g.arc(CX - 2 * c, CY, 3, 0, 2 * Math.PI); g.fill();
+
+    // trail
+    trail.push([st.x, st.y]);
+    if (trail.length > 260) trail.shift();
+    g.beginPath();
+    trail.forEach(([x, y], i) => i ? g.lineTo(CX + x, CY - y) : g.moveTo(CX + x, CY - y));
+    g.strokeStyle = 'rgba(120,170,255,0.55)'; g.lineWidth = 2; g.stroke();
+
+    // star at the focus
+    const grd = g.createRadialGradient(CX, CY, 0, CX, CY, 26);
+    grd.addColorStop(0, '#fff3c4'); grd.addColorStop(0.4, '#ffcc55');
+    grd.addColorStop(1, 'rgba(255,180,40,0)');
+    g.fillStyle = grd;
+    g.beginPath(); g.arc(CX, CY, 26, 0, 2 * Math.PI); g.fill();
+    g.fillStyle = '#ffd76a';
+    g.beginPath(); g.arc(CX, CY, 8, 0, 2 * Math.PI); g.fill();
+
+    // radius vector + planet
+    g.beginPath(); g.moveTo(CX, CY); g.lineTo(CX + st.x, CY - st.y);
+    g.strokeStyle = 'rgba(150,150,190,0.35)'; g.lineWidth = 1; g.stroke();
+    g.fillStyle = '#8fb8ff';
+    g.beginPath(); g.arc(CX + st.x, CY - st.y, 6, 0, 2 * Math.PI); g.fill();
+
+    const deg = x => (x * 180 / Math.PI + 360) % 360;
+    document.getElementById('M').textContent  = deg(M).toFixed(1) + '°';
+    document.getElementById('E').textContent  = deg(E).toFixed(1) + '°';
+    document.getElementById('nu').textContent = deg(st.nu).toFixed(1) + '°';
+    document.getElementById('r').textContent  = (st.r / AU).toFixed(3) + ' AU';
+    document.getElementById('v').textContent  = (st.v / AU).toFixed(3) + ' AU/yr';
+    document.getElementById('it').textContent = iters;
+
+    requestAnimationFrame(frame);
+  }
+  requestAnimationFrame(frame);
+})();
+</script>
+</html>
