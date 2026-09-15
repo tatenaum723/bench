@@ -37,6 +37,8 @@ OMP_MIN = 20 * 1024        # below this omp's own prompt + a reply cannot fit
 CTX_FLOOR = 48 * 1024
 # A model whose largest rung scores under this is not competitive; don't spend more rungs on it.
 COMPETITIVE = 50
+# Tate, 2026-09-14: skip the 3rd-sample top-up for these (best rung stays at 2 samples).
+SKIP_TOPUP = {"qwen3.5-9b"}
 KNOBS = ["think", "max2048", "max8192", "temp0.2", "lean-tools"]
 STATE = os.path.join(RES, "_campaign_state.json")
 
@@ -219,8 +221,11 @@ def main():
         if usable:
             best = max(usable.items(), key=lambda kv: (round(kv[1]["overall"]), kv[1]["ctx"]))[0]
             state["best"][model] = best
-            s = run(model, best, 3)
-            state["ladders"][model][best].update(s or {})
+            if model in SKIP_TOPUP:
+                log(f"SKIP TOPUP {model}: best rung {best} stays at 2 samples (Tate's call)")
+            else:
+                s = run(model, best, 3)
+                state["ladders"][model][best].update(s or {})
         json.dump(state, open(STATE, "w"), indent=2)
 
     ranked = sorted(state["best"].items(),
