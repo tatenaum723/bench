@@ -311,6 +311,13 @@ def stop_orphaned_bench_servers(port=30000, grace=60):
         except OSError:
             continue
         a = [x.decode(errors="replace") for x in argv]
+        try:
+            # A server run as a systemd service (e.g. the daily model) is not an orphan:
+            # leave it alone and let start() report "port in use" instead.
+            if ".service" in open(f"/proc/{d}/cgroup").read().split("/")[-1]:
+                continue
+        except OSError:
+            pass
         if "sglang.launch_server" in a and "/home/tate/qwen35/" in a[0] and \
                 (("--port" in a and a[a.index("--port") + 1] == str(port)) or ("--port" not in a and port == 30000)):
             sessions.add(int(stat[3]))
