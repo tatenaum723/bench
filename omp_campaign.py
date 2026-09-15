@@ -38,7 +38,9 @@ CTX_FLOOR = 48 * 1024
 # A model whose largest rung scores under this is not competitive; don't spend more rungs on it.
 COMPETITIVE = 50
 # Tate, 2026-09-14: skip the 3rd-sample top-up for these (best rung stays at 2 samples).
-SKIP_TOPUP = {"qwen3.5-9b"}
+SKIP_TOPUP = {"qwen3.5-9b", "granite42-8b"}
+# Tate, 2026-09-14: "skip to the Gemma variant probes" -- keep whatever these rungs already have.
+SKIP_RUNGS = {("gemma4-12b", "ctx48k-kvfp8-ct")}
 KNOBS = ["think", "max2048", "max8192", "temp0.2", "lean-tools"]
 STATE = os.path.join(RES, "_campaign_state.json")
 
@@ -170,6 +172,12 @@ def ladder(model, pr):
     results = {}
     for i, ctx in enumerate(rungs):
         v = rung_variant(pr, ctx)
+        if (model, v) in SKIP_RUNGS:
+            s = summarize(model, v)
+            log(f"SKIP RUNG {model} {v}: kept as-is with {s['n'] if s else 0} episodes (Tate's call)")
+            if s:
+                results[v] = {"ctx": ctx, "partial": True, **s}
+            continue
         s = run(model, v, 2)
         results[v] = {"ctx": ctx, **(s or {})}
         if unusable(s):
@@ -188,7 +196,8 @@ def ladder(model, pr):
     # refine big drops
     ordered = sorted(results.items(), key=lambda kv: -kv[1]["ctx"])
     for (va, a), (vb, b) in zip(ordered, ordered[1:]):
-        if "overall" in a and "overall" in b and abs(a["overall"] - b["overall"]) > 15:
+        if "overall" in a and "overall" in b and not a.get("partial") and not b.get("partial") \
+                and abs(a["overall"] - b["overall"]) > 15:
             mid = ((a["ctx"] + b["ctx"]) // 2 // 4096) * 4096
             if mid not in (a["ctx"], b["ctx"]) and mid >= CTX_FLOOR:
                 v = rung_variant(pr, mid)
@@ -217,7 +226,8 @@ def main():
             continue
         log(f"LADDER {model}: proven max contexts {pools(pr)}")
         state["ladders"][model] = ladder(model, pr)
-        usable = {v: r for v, r in state["ladders"][model].items() if "overall" in r and not unusable(r)}
+        usable = {v: r for v, r in state["ladders"][model].items()
+                  if "overall" in r and not unusable(r) and not r.get("partial")}
         if usable:
             best = max(usable.items(), key=lambda kv: (round(kv[1]["overall"]), kv[1]["ctx"]))[0]
             state["best"][model] = best
